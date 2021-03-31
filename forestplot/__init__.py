@@ -1,4 +1,8 @@
 MISSING = 'Missing'
 PVALUE_NAME = 'Pvalue'
 PV_INTER_NAME = 'Pvalue interaction'
+ESTIMATOR_NAME = 'Estimator'
+CI_NAME = 'CI'
 SUBGROUPS_NAME = 'Subgroups'
+decimal = '([+-]?\d+(?:\.\d*)?)'
+REGEX = decimal + '\(' + decimal + '\,' + decimal + '\)'

@@ -1,109 +1,159 @@
-import collections
 import re
 
 import matplotlib
+
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 
-from forestplot import PV_INTER_NAME, SUBGROUPS_NAME
+import numpy as np
+from forestplot import REGEX
 
 
-def plot(data, savepath=None):
-    delta = 0.5
-    top_margin = 2
-    bottom_margin = 2
-    margin = top_margin + bottom_margin
+class ForestPlot:
+    FONT_RATIO = 72
+    CI_SIZE = 30
 
-    # LINES NUMBER
-    p = margin
-    for k, v in data.items():
-        p += 1 + len(v[SUBGROUPS_NAME].keys())
+    def __init__(self, headers, results, ci_col=None, ci_center=0, hmargin=0.1, vmargin=0.1, xlim=None,
+                 round_x_axis=True, fontsize=10):
 
-    x = 20
-    z = p * x / 30
+        self.headers = self.reformat(headers)
+        self.results = results
+        self.ci_center = ci_center
+        for i in range(len(self.results)):
+            self.results[i] = self.reformat(self.results[i])
+        self.ci_col = ci_col
+        self.hmargin = hmargin
+        self.vmargin = vmargin
+        self.round_x_axis = round_x_axis
+        if xlim is None:
+            self.xlim = [-10e10, 10e10]
+        else:
+            self.xlim = xlim
+        if self.xlim[0] is None:
+            self.xlim[0] = -10e10
+        if self.xlim[1] is None:
+            self.xlim[1] = 10e10
+        if self.ci_col is not None:
+            self.ci_boundaries()
 
-    decimal = '(\d(?:\.\d+)?)'
-    reg = decimal + '\(' + decimal + '-' + decimal + '\)'
-    fontsize = 77 * z * (1 - delta) / (p + 1)
-    horiz_margin = fontsize / x / 77
-    # WRITE COLUMNS NAMES
-    col_pos = {
-        'Features': horiz_margin,
-        'HR (95% CI)': 1 - 18 * horiz_margin,
-        'Pvalue': 1 - 5.5 * horiz_margin
-    }
-    pos_colnames = (p - (1 - delta) / 2) / (p + 1)
+        self.fontsize = fontsize
+        x, y = self.grid_measures()
+        self.fig, self.ax = plt.subplots(nrows=1, ncols=1, figsize=(x, y))
+        plt.xlim((0, 1))
+        plt.ylim((0, 1))
+        self.ax.axis("off")
 
-    fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(x, z))
+    @staticmethod
+    def reformat(ar):
+        return [a if isinstance(a, tuple) else (a, {}) for a in ar]
 
-    for name, pos in col_pos.items():
-        ax.text(pos, pos_colnames, name, fontsize=fontsize, fontweight='bold')
+    def ci_boundaries(self):
+        idx = [txt[0] for txt in self.headers].index(self.ci_col)
+        cis = [res[idx] for res in self.results]
+        inf, sup = [], []
+        for text in cis:
+            if text[0] is not None:
+                f = re.search(REGEX, text[0])
+                m, inf_, sup_ = f.groups()
+                inf.append(float(inf_))
+                sup.append(float(sup_))
 
-    lign_count = top_margin
-    col_count = 0
-    lowest, highest = 1, 1
-    biggest = 0
-    for name, sub in data.items():
-        biggest = max(len(name), biggest)
-        pos = (p - lign_count - (1 - delta) / 2) / (p + 1)
-        lign_count += 1
+        self.xlim[0] = max(self.xlim[0], np.min(inf))
+        self.xlim[1] = min(self.xlim[1], np.max(sup))
+        if self.round_x_axis:
+            self.xlim[0] = int(divmod(self.xlim[0], 1)[0])
+            self.xlim[1] = int(divmod(self.xlim[1], 1)[0]) + 1
 
-        # WRITE FEATURE NAME AND ASSOCIATED INTERACTION PVALUE
-        ax.text(col_pos['Features'], pos, name, fontsize=fontsize, fontweight='bold')
-        ax.text(col_pos['Pvalue'], pos, round(sub[PV_INTER_NAME], 2), fontsize=fontsize)
+    def grid_measures(self):
+        y_cell = self.fontsize * 2 / ForestPlot.FONT_RATIO
+        self.n_rows = len(self.results) + 2 + 2 * int(self.ci_col is not None)
+        y = (self.n_rows * y_cell) / (1 - 2 * self.vmargin)
 
-        for subname, values in collections.OrderedDict(sorted(sub[SUBGROUPS_NAME].items())).items():
-            pos = (p - lign_count - (1 - delta) / 2) / (p + 1)
-            lign_count += 1
+        self.column_sizes = []
+        for i, header in enumerate(self.headers):
+            if header[0] == self.ci_col:
+                self.column_sizes.append(2 * self.fontsize / ForestPlot.FONT_RATIO / 2.5 * ForestPlot.CI_SIZE)
+            max_size = np.max(
+                [len(texts[i][0]) for texts in self.results if texts[i][0] is not None] + [len(header[0])])
+            self.column_sizes.append(2 * self.fontsize / ForestPlot.FONT_RATIO / 2.5 * max_size)
 
-            # WRITE SUBGROUP NAME AND SUBGROUP HR WRT THE TRT
-            ax.text(col_pos['Features'], pos, subname, fontsize=fontsize)
-            ax.text(col_pos['HR (95% CI)'], pos, values, fontsize=fontsize)
+        x = (np.sum(self.column_sizes)) / (1 - 2 * self.hmargin)
 
-            # COLLECT HR INFO
-            f = re.search(reg, values)
-            m, inf, sup = f.groups()
-            lowest = min(float(inf), lowest)
-            highest = max(float(sup), highest)
+        self.column_sizes = np.asarray(self.column_sizes) / np.sum(self.column_sizes) * (1 - 2 * self.hmargin)
 
-    # LIMIT lEFT AND RIGHT FOR THE CI LINES
-    pos_ci_left = col_pos['Features'] + biggest * horiz_margin
-    pos_ci_right = col_pos['HR (95% CI)'] - 2 * horiz_margin
+        self.column_pos = np.cumsum([0] + list(self.column_sizes[:-1]))
+        self.column_pos += self.hmargin
+        self.cell_height = (1 - self.vmargin * 2) / self.n_rows
+        self.row_pos = 1 - (self.vmargin + self.cell_height * (np.arange(self.n_rows) + 0.5))
 
-    def scale(x):
-        x = float(x)
-        x = (x - lowest) / (highest - lowest)
-        return x * (pos_ci_right - pos_ci_left) + pos_ci_left
+        return x, y
 
-    # DRAW THE CONF INT LINE
-    lign_count = top_margin
-    for name, sub in data.items():
-        lign_count += 1
-        for subname, values in collections.OrderedDict(sorted(sub[SUBGROUPS_NAME].items())).items():
-            pos = (p - lign_count + 1 / 5 - (1 - delta) / 2) / (p + 1)
-            lign_count += 1
-            f = re.search(reg, values)
-            m, inf, sup = f.groups()
-            ax.hlines(pos, scale(inf), scale(sup))
-            ax.scatter((scale(m),), (pos,), c='black')
+    def add_cell(self, n_col, n_row, text, fontdict):
+        x = self.column_pos[n_col]
+        y = self.row_pos[n_row]
+        fontdict['fontsize'] = self.fontsize
+        self.ax.text(x, y, text, fontdict=fontdict, va='center')
+        return
 
-    # DRAW THE X AXIS AND VERTICAL LINE
-    pos_bottom_lign = (bottom_margin + 1 / 5 - (1 - delta) / 2) / (p + 1)
-    pos_top_lign = (p - top_margin + 1 - 1 / 5 - (1 - delta) / 2) / (p + 1)
-    ax.vlines(scale(1), pos_bottom_lign, pos_top_lign, linestyle='--')
-    ax.hlines(pos_bottom_lign, pos_ci_left, pos_ci_right)
-    ax.vlines(pos_ci_left, pos_bottom_lign, pos_bottom_lign - horiz_margin * x / z)
-    ax.vlines(pos_ci_right, pos_bottom_lign, pos_bottom_lign - horiz_margin * x / z)
-    pos_bottom_lign = (bottom_margin - 1 - (1 - delta) / 2) / (p + 1)
-    for value in (1, lowest, highest):
-        ax.text(scale(value) - horiz_margin / 2, pos_bottom_lign, value, fontsize=fontsize)
+    def ci_scale(self, left_pos, hsize):
+        def f(point):
+            point = (point - self.xlim[0]) / (self.xlim[1] - self.xlim[0])
+            return point * hsize + left_pos
 
-    ax.get_xaxis().set_visible(False)
-    ax.get_yaxis().set_visible(False)
-    ax.set_ylim(0, 1)
-    ax.set_xlim(0, 1)
+        return f
 
-    if savepath is not None:
-        plt.savefig(savepath)
+    def draw_ci(self, n_row, scale, value, inf, sup, **kwargs):
+        y = self.row_pos[n_row]
+        inf = max(self.xlim[0], inf)
+        sup = min(self.xlim[1], sup)
+        self.ax.hlines(y, scale(inf), scale(sup), **kwargs)
+        self.ax.scatter((scale(value),), (y,), c='black', **kwargs)
+        delta = self.cell_height / 3
+        if inf == self.xlim[0]:
+            self.ax.vlines(scale(inf), y - delta, y + delta, **kwargs)
+        if sup == self.xlim[1]:
+            self.ax.vlines(scale(sup), y - delta, y + delta, **kwargs)
+        return
 
-    return ax
+    def add_column(self, header, values, n_col):
+        text, fontdict = header
+        fontdict['fontweight'] = fontdict.get('fontweight', 'bold')
+        self.add_cell(n_col, 0, text, fontdict)
+        print(values)
+        for i, (name, fontdict) in enumerate(values):
+            self.add_cell(n_col, i + 2, name, fontdict)
+
+    def add_forest(self, header, values, n_col):
+        size = self.column_sizes[n_col]
+        x = self.column_pos[n_col]
+        scale = self.ci_scale(x, size)
+
+        text, fontdict = header
+        self.add_cell(0, n_col, text, fontdict)
+        for i, (text, kwargs) in enumerate(values):
+            if text is not None:
+                f = re.search(REGEX, text)
+                m, inf, sup = f.groups()
+                self.draw_ci(i + 2, scale, float(m), float(inf), float(sup), **kwargs)
+
+        # DRAW THE AXIS AND VERTICAL LINE
+        y = self.row_pos[-2]
+        delta = self.cell_height / 3
+        self.ax.vlines(scale(self.ci_center), self.row_pos[0], y, linestyle='--')
+        self.ax.hlines(y, scale(self.xlim[0]), scale(self.xlim[1]))
+        self.ax.vlines(scale(self.xlim[0]), y, y - delta)
+        self.ax.vlines(scale(self.xlim[1]), y, y - delta)
+        for value in [self.ci_center] + self.xlim:
+            self.ax.text(scale(value), self.row_pos[-1], value, va='center', ha='center', fontsize=self.fontsize)
+
+    def plot(self, savefig=None):
+        shift = 0
+        for i, header in enumerate(self.headers):
+            values = [texts[i] for texts in self.results]
+            if header[0] == self.ci_col:
+                self.add_forest(('', {}), values, i)
+                shift = 1
+            self.add_column(header, values, i + shift)
+        if savefig is not None:
+            plt.savefig(savefig)
+        return self.ax
