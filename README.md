@@ -17,6 +17,6 @@ from forestplot.utils import analyse
 
 df = your pandas dataset
 trt, T, E = 'treatment name', 'time name', 'event name'
-data = analyse(df, trt, T, E, dropna=False)
+data = analyse(df, trt, T, E, dropna=False, max_mod=6)
 plot(data, savepath='forestplot.png')
 ```
