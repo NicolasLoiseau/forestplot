@@ -41,8 +41,8 @@ def interaction(df, treatment, time, event, max_mod=10, dropna=True):
     return ['Features', 'log HR', 'p value'], results
 
 
-def association(df, treatment, time, event, max_mod=10, dropna=True):
-    feats = [f for f in df.columns if f not in [treatment, time, event]]
+def association(df, time, event, max_mod=10, dropna=True):
+    feats = [f for f in df.columns if f not in [time, event]]
     results = []
     for feat in feats:
         loghr = Log_HR(df, feature=feat, time=time, event=event)
@@ -78,11 +78,3 @@ def binning(series, max_mod=10, dropna=True):
 
             out[~series.isna()] = series.dropna().apply(split)
     return out
-
-
-def reformat(results, order=None):
-    headers = []
-    out = []
-    order = order or list(results.keys())
-    for feat in order:
-        pass
